@@ -22,8 +22,8 @@ const (
 	defaultTraceAddr = "localhost:8126"
 
 	// version specifies the version identifier that will be attached to the
-	// HTTP headers. In this case it is prefixed OC for Opencensus.
-	version = "OC/0.1.0"
+	// HTTP headers. In this case it is prefixed OTEL for OpenTelemetry.
+	version = "OTEL/0.1.0"
 )
 
 // transport holds an HTTP client used to connect to the Datadog agent at the specified URL.

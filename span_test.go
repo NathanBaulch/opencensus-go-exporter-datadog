@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"go.opencensus.io/trace"
+	"go.opentelemetry.io/otel/api/trace"
+	"go.opentelemetry.io/otel/label"
+	export "go.opentelemetry.io/otel/sdk/export/trace"
+	"google.golang.org/grpc/codes"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext"
 )
 
@@ -21,35 +24,33 @@ var (
 
 // spanPairs holds a set of trace.SpanData and its corresponding conversion to a ddSpan.
 var spanPairs = map[string]struct {
-	oc *trace.SpanData
+	oc *export.SpanData
 	dd *ddSpan
 }{
 	"root": {
-		oc: &trace.SpanData{
+		oc: &export.SpanData{
 			SpanContext: trace.SpanContext{
-				TraceID:      trace.TraceID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
-				SpanID:       trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
-				TraceOptions: 1,
+				TraceID:    trace.ID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
+				SpanID:     trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
+				TraceFlags: 1,
 			},
 			SpanKind:  trace.SpanKindClient,
 			Name:      "/a/b",
 			StartTime: testStartTime,
 			EndTime:   testEndTime,
-			Attributes: map[string]interface{}{
-				"str":   "abc",
-				"bool":  true,
-				"int64": int64(1),
+			Attributes: []label.KeyValue{
+				label.String("str", "abc"),
+				label.Bool("bool", true),
+				label.Int64("int64", 1),
 			},
-			Status: trace.Status{
-				Code:    0,
-				Message: "status-msg",
-			},
+			StatusCode:    0,
+			StatusMessage: "status-msg",
 		},
 		dd: &ddSpan{
 			TraceID:  651345242494996240,
 			SpanID:   72623859790382856,
 			Type:     "client",
-			Name:     "opencensus",
+			Name:     "opentelemetry",
 			Resource: "/a/b",
 			Start:    testStartTime.UnixNano(),
 			Duration: testEndTime.UnixNano() - testStartTime.UnixNano(),
@@ -65,26 +66,24 @@ var spanPairs = map[string]struct {
 		},
 	},
 	"child": {
-		oc: &trace.SpanData{
+		oc: &export.SpanData{
 			SpanContext: trace.SpanContext{
-				TraceID:      trace.TraceID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
-				SpanID:       trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
-				TraceOptions: 1,
+				TraceID:    trace.ID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
+				SpanID:     trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
+				TraceFlags: 1,
 			},
 			ParentSpanID: trace.SpanID([8]byte{8, 7, 6, 5, 4, 3, 2, 1}),
 			SpanKind:     trace.SpanKindClient,
 			Name:         "/a/b",
 			StartTime:    testStartTime,
 			EndTime:      testEndTime,
-			Attributes:   map[string]interface{}{},
-			Status:       trace.Status{},
 		},
 		dd: &ddSpan{
 			TraceID:  651345242494996240,
 			SpanID:   72623859790382856,
 			ParentID: 578437695752307201,
 			Type:     "client",
-			Name:     "opencensus",
+			Name:     "opentelemetry",
 			Resource: "/a/b",
 			Start:    testStartTime.UnixNano(),
 			Duration: testEndTime.UnixNano() - testStartTime.UnixNano(),
@@ -97,27 +96,24 @@ var spanPairs = map[string]struct {
 		},
 	},
 	"server_error_4xx": {
-		oc: &trace.SpanData{
+		oc: &export.SpanData{
 			SpanContext: trace.SpanContext{
-				TraceID:      trace.TraceID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
-				SpanID:       trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
-				TraceOptions: 1,
+				TraceID:    trace.ID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
+				SpanID:     trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
+				TraceFlags: 1,
 			},
-			SpanKind:   trace.SpanKindServer,
-			Name:       "/a/b",
-			StartTime:  testStartTime,
-			EndTime:    testEndTime,
-			Attributes: map[string]interface{}{},
-			Status: trace.Status{
-				Code:    trace.StatusCodeCancelled,
-				Message: "status-msg",
-			},
+			SpanKind:      trace.SpanKindServer,
+			Name:          "/a/b",
+			StartTime:     testStartTime,
+			EndTime:       testEndTime,
+			StatusCode:    codes.Canceled,
+			StatusMessage: "status-msg",
 		},
 		dd: &ddSpan{
 			TraceID:  651345242494996240,
 			SpanID:   72623859790382856,
 			Type:     "server",
-			Name:     "opencensus",
+			Name:     "opentelemetry",
 			Resource: "/a/b",
 			Start:    testStartTime.UnixNano(),
 			Duration: testEndTime.UnixNano() - testStartTime.UnixNano(),
@@ -132,27 +128,24 @@ var spanPairs = map[string]struct {
 		},
 	},
 	"server_error_5xx": {
-		oc: &trace.SpanData{
+		oc: &export.SpanData{
 			SpanContext: trace.SpanContext{
-				TraceID:      trace.TraceID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
-				SpanID:       trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
-				TraceOptions: 1,
+				TraceID:    trace.ID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
+				SpanID:     trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
+				TraceFlags: 1,
 			},
-			SpanKind:   trace.SpanKindServer,
-			Name:       "/a/b",
-			StartTime:  testStartTime,
-			EndTime:    testEndTime,
-			Attributes: map[string]interface{}{},
-			Status: trace.Status{
-				Code:    trace.StatusCodeInternal,
-				Message: "status-msg",
-			},
+			SpanKind:      trace.SpanKindServer,
+			Name:          "/a/b",
+			StartTime:     testStartTime,
+			EndTime:       testEndTime,
+			StatusCode:    codes.Internal,
+			StatusMessage: "status-msg",
 		},
 		dd: &ddSpan{
 			TraceID:  651345242494996240,
 			SpanID:   72623859790382856,
 			Type:     "server",
-			Name:     "opencensus",
+			Name:     "opentelemetry",
 			Resource: "/a/b",
 			Start:    testStartTime.UnixNano(),
 			Duration: testEndTime.UnixNano() - testStartTime.UnixNano(),
@@ -169,27 +162,24 @@ var spanPairs = map[string]struct {
 		},
 	},
 	"client_error_4xx": {
-		oc: &trace.SpanData{
+		oc: &export.SpanData{
 			SpanContext: trace.SpanContext{
-				TraceID:      trace.TraceID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
-				SpanID:       trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
-				TraceOptions: 1,
+				TraceID:    trace.ID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
+				SpanID:     trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
+				TraceFlags: 1,
 			},
-			SpanKind:   trace.SpanKindClient,
-			Name:       "/a/b",
-			StartTime:  testStartTime,
-			EndTime:    testEndTime,
-			Attributes: map[string]interface{}{},
-			Status: trace.Status{
-				Code:    trace.StatusCodeCancelled,
-				Message: "status-msg",
-			},
+			SpanKind:      trace.SpanKindClient,
+			Name:          "/a/b",
+			StartTime:     testStartTime,
+			EndTime:       testEndTime,
+			StatusCode:    codes.Canceled,
+			StatusMessage: "status-msg",
 		},
 		dd: &ddSpan{
 			TraceID:  651345242494996240,
 			SpanID:   72623859790382856,
 			Type:     "client",
-			Name:     "opencensus",
+			Name:     "opentelemetry",
 			Resource: "/a/b",
 			Start:    testStartTime.UnixNano(),
 			Duration: testEndTime.UnixNano() - testStartTime.UnixNano(),
@@ -206,27 +196,24 @@ var spanPairs = map[string]struct {
 		},
 	},
 	"client_error_5xx": {
-		oc: &trace.SpanData{
+		oc: &export.SpanData{
 			SpanContext: trace.SpanContext{
-				TraceID:      trace.TraceID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
-				SpanID:       trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
-				TraceOptions: 1,
+				TraceID:    trace.ID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
+				SpanID:     trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
+				TraceFlags: 1,
 			},
-			SpanKind:   trace.SpanKindClient,
-			Name:       "/a/b",
-			StartTime:  testStartTime,
-			EndTime:    testEndTime,
-			Attributes: map[string]interface{}{},
-			Status: trace.Status{
-				Code:    trace.StatusCodeInternal,
-				Message: "status-msg",
-			},
+			SpanKind:      trace.SpanKindClient,
+			Name:          "/a/b",
+			StartTime:     testStartTime,
+			EndTime:       testEndTime,
+			StatusCode:    codes.Internal,
+			StatusMessage: "status-msg",
 		},
 		dd: &ddSpan{
 			TraceID:  651345242494996240,
 			SpanID:   72623859790382856,
 			Type:     "client",
-			Name:     "opencensus",
+			Name:     "opentelemetry",
 			Resource: "/a/b",
 			Start:    testStartTime.UnixNano(),
 			Duration: testEndTime.UnixNano() - testStartTime.UnixNano(),
@@ -241,30 +228,29 @@ var spanPairs = map[string]struct {
 		},
 	},
 	"tags": {
-		oc: &trace.SpanData{
+		oc: &export.SpanData{
 			SpanContext: trace.SpanContext{
-				TraceID:      trace.TraceID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
-				SpanID:       trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
-				TraceOptions: 1,
+				TraceID:    trace.ID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
+				SpanID:     trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
+				TraceFlags: 1,
 			},
 			SpanKind:  trace.SpanKindServer,
 			Name:      "/a/b",
 			StartTime: testStartTime,
 			EndTime:   testEndTime,
-			Attributes: map[string]interface{}{
-				ext.Error:            true,
-				ext.ServiceName:      "other-service",
-				ext.ResourceName:     "other-resource",
-				ext.SpanType:         "other-type",
-				ext.SamplingPriority: int64(ext.PriorityUserReject),
+			Attributes: []label.KeyValue{
+				label.Bool(ext.Error, true),
+				label.String(ext.ServiceName, "other-service"),
+				label.String(ext.ResourceName, "other-resource"),
+				label.String(ext.SpanType, "other-type"),
+				label.Int64(ext.SamplingPriority, ext.PriorityUserReject),
 			},
-			Status: trace.Status{},
 		},
 		dd: &ddSpan{
 			TraceID:  651345242494996240,
 			SpanID:   72623859790382856,
 			Type:     "other-type",
-			Name:     "opencensus",
+			Name:     "opentelemetry",
 			Resource: "other-resource",
 			Start:    testStartTime.UnixNano(),
 			Duration: testEndTime.UnixNano() - testStartTime.UnixNano(),
@@ -280,11 +266,11 @@ var spanPairs = map[string]struct {
 		},
 	},
 	"slash": {
-		oc: &trace.SpanData{
+		oc: &export.SpanData{
 			SpanContext: trace.SpanContext{
-				TraceID:      trace.TraceID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
-				SpanID:       trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
-				TraceOptions: 1,
+				TraceID:    trace.ID([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
+				SpanID:     trace.SpanID([8]byte{1, 2, 3, 4, 5, 6, 7, 8}),
+				TraceFlags: 1,
 			},
 			SpanKind:  trace.SpanKindClient,
 			Name:      "/",
@@ -295,7 +281,7 @@ var spanPairs = map[string]struct {
 			TraceID:  651345242494996240,
 			SpanID:   72623859790382856,
 			Type:     "client",
-			Name:     "opencensus",
+			Name:     "opentelemetry",
 			Resource: "/",
 			Start:    testStartTime.UnixNano(),
 			Duration: testEndTime.UnixNano() - testStartTime.UnixNano(),
@@ -326,7 +312,7 @@ func TestConvertSpan(t *testing.T) {
 func TestGlobalTags(t *testing.T) {
 	e := newTraceExporter(Options{
 		Service:    "my-service",
-		GlobalTags: map[string]interface{}{"key1": "value1"},
+		GlobalTags: []label.KeyValue{label.String("key1", "value1")},
 	})
 	defer e.stop()
 
@@ -338,18 +324,17 @@ func TestGlobalTags(t *testing.T) {
 
 func TestSetError(t *testing.T) {
 	for i, tt := range [...]struct {
-		val interface{} // error value
+		val label.Value // error value
 		err int32       // expected error field value
 		msg string      // expected error message tag value
 	}{
-		{val: "error", err: 1, msg: "error"},
-		{val: true, err: 1},
-		{val: false},
-		{val: int64(12), err: 1},
-		{val: int64(-1)},
-		{val: int64(0)},
-		{val: nil},
-		{val: float32(0), err: 1},
+		{val: label.StringValue("error"), err: 1, msg: "error"},
+		{val: label.BoolValue(true), err: 1},
+		{val: label.BoolValue(false)},
+		{val: label.Int64Value(12), err: 1},
+		{val: label.Int64Value(-1)},
+		{val: label.Int64Value(0)},
+		{val: label.Float32Value(0), err: 1},
 	} {
 		span := &ddSpan{Meta: map[string]string{}}
 		setError(span, tt.val)
@@ -391,56 +376,56 @@ func TestSetTag(t *testing.T) {
 
 	t.Run("error", func(t *testing.T) {
 		span := testSpan()
-		setTag(span, ext.Error, true)
+		setTag(span, ext.Error, label.BoolValue(true))
 		equalFunc(t)(span.Error, int32(1))
 	})
 
 	t.Run("string", func(t *testing.T) {
 		eq := equalFunc(t)
 		span := testSpan()
-		setTag(span, ext.ResourceName, "resource")
+		setTag(span, ext.ResourceName, label.StringValue("resource"))
 		eq(span.Resource, "resource")
-		setTag(span, "key", "value")
+		setTag(span, "key", label.StringValue("value"))
 		eq(span.Meta["key"], "value")
 	})
 
 	t.Run("bool", func(t *testing.T) {
 		eq := equalFunc(t)
 		span := testSpan()
-		setTag(span, "key", true)
+		setTag(span, "key", label.BoolValue(true))
 		eq(span.Meta["key"], "true")
-		setTag(span, "key2", false)
+		setTag(span, "key2", label.BoolValue(false))
 		eq(span.Meta["key2"], "false")
-		setTag(span, ext.AnalyticsEvent, true)
+		setTag(span, ext.AnalyticsEvent, label.BoolValue(true))
 		eq(span.Metrics[ext.EventSampleRate], 1.)
-		setTag(span, ext.AnalyticsEvent, false)
+		setTag(span, ext.AnalyticsEvent, label.BoolValue(false))
 		eq(span.Metrics[ext.EventSampleRate], 0.)
 	})
 
 	t.Run("int64", func(t *testing.T) {
 		eq := equalFunc(t)
 		span := testSpan()
-		setTag(span, "key", int64(12))
+		setTag(span, "key", label.Int64Value(12))
 		eq(span.Metrics["key"], float64(12))
-		setTag(span, ext.SamplingPriority, int64(1))
+		setTag(span, ext.SamplingPriority, label.Int64Value(1))
 		eq(span.Metrics[keySamplingPriority], float64(1))
 	})
 
 	t.Run("float64", func(t *testing.T) {
 		eq := equalFunc(t)
 		span := testSpan()
-		setTag(span, "key", float64(12))
+		setTag(span, "key", label.Float64Value(12))
 		eq(span.Metrics["key"], float64(12))
-		setTag(span, ext.SamplingPriority, float64(1))
+		setTag(span, ext.SamplingPriority, label.Float64Value(1))
 		eq(span.Metrics[keySamplingPriority], float64(1))
-		setTag(span, ext.EventSampleRate, float64(0.4))
+		setTag(span, ext.EventSampleRate, label.Float64Value(0.4))
 		eq(span.Metrics[ext.EventSampleRate], float64(0.4))
 	})
 
 	t.Run("default", func(t *testing.T) {
 		span := testSpan()
-		setTag(span, "key", 1)
-		equalFunc(t)(span.Meta["key"], "1")
+		setTag(span, "key", label.Int32Value(1))
+		equalFunc(t)(span.Metrics["key"], float64(1))
 	})
 }
 

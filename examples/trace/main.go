@@ -8,9 +8,12 @@ package main
 import (
 	"context"
 	"log"
+	"time"
 
 	datadog "github.com/DataDog/opencensus-go-exporter-datadog"
-	"go.opencensus.io/trace"
+	"go.opentelemetry.io/otel/api/global"
+	"go.opentelemetry.io/otel/label"
+	"go.opentelemetry.io/otel/sdk/trace"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext"
 )
 
@@ -21,27 +24,33 @@ func main() {
 	}
 	defer exporter.Stop()
 
-	trace.RegisterExporter(exporter)
+	batcher := trace.WithBatcher(exporter)
+	tp, err := trace.NewProvider(batcher)
+	if err != nil {
+		log.Fatal(err)
+	}
+	global.SetTraceProvider(tp)
 
-	// For demoing purposes, always sample.
-	trace.ApplyConfig(trace.Config{
-		DefaultSampler: trace.AlwaysSample(),
-	})
-
-	ctx, span := trace.StartSpan(context.Background(), "/foo")
+	ctx, span := global.Tracer("example").Start(context.Background(), "/foo")
+	time.Sleep(100*time.Millisecond)
 	bar(ctx)
+	time.Sleep(100*time.Millisecond)
 	span.End()
+
+	// Give the OTEL exporter time to flush
+	time.Sleep(5*time.Second)
 }
 
 func bar(ctx context.Context) {
-	ctx, span := trace.StartSpan(ctx, "/bar")
+	ctx, span := global.Tracer("example").Start(ctx, "/bar")
 	defer span.End()
 
 	// Do bar...
+	time.Sleep(100*time.Millisecond)
 
 	// Set Datadog APM Trace Metadata
-	span.AddAttributes(
-		trace.StringAttribute(ext.ResourceName, "/foo/bar"),
-		trace.StringAttribute(ext.SpanType, ext.SpanTypeWeb),
+	span.SetAttributes(
+		label.String(ext.ResourceName, "/foo/bar"),
+		label.String(ext.SpanType, ext.SpanTypeWeb),
 	)
 }

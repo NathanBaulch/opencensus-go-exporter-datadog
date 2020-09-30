@@ -6,18 +6,21 @@
 package datadog
 
 import (
+	"context"
 	"log"
 	"regexp"
 	"strings"
 
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
-	"go.opencensus.io/trace"
+	"go.opentelemetry.io/otel/label"
+	"go.opentelemetry.io/otel/sdk/export/trace"
 )
 
 var (
-	_ view.Exporter  = (*Exporter)(nil)
-	_ trace.Exporter = (*Exporter)(nil)
+	_ view.Exporter     = (*Exporter)(nil)
+	_ trace.SpanSyncer  = (*Exporter)(nil)
+	_ trace.SpanBatcher = (*Exporter)(nil)
 )
 
 // Exporter exports stats to Datadog.
@@ -34,9 +37,16 @@ func (e *Exporter) ExportView(vd *view.Data) {
 	e.statsExporter.addViewData(vd)
 }
 
-// ExportSpan implements trace.Exporter.
-func (e *Exporter) ExportSpan(s *trace.SpanData) {
+// ExportSpan implements trace.SpanSyncer.
+func (e *Exporter) ExportSpan(_ context.Context, s *trace.SpanData) {
 	e.traceExporter.exportSpan(s)
+}
+
+// ExportSpans implements trace.SpanBatcher.
+func (e *Exporter) ExportSpans(_ context.Context, batch []*trace.SpanData) {
+	for _, s := range batch {
+		e.traceExporter.exportSpan(s)
+	}
 }
 
 // Stop cleanly stops the exporter, flushing any remaining spans and stats to the transport and
@@ -73,7 +83,7 @@ type Options struct {
 
 	// GlobalTags holds a set of tags that will automatically be applied to all
 	// exported spans.
-	GlobalTags map[string]interface{}
+	GlobalTags []label.KeyValue
 
 	// DisableCountPerBuckets specifies whether to emit count_per_bucket metrics
 	DisableCountPerBuckets bool

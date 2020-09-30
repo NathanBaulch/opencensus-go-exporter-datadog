@@ -11,30 +11,33 @@ import (
 	"net/http"
 	"strconv"
 
-	"go.opencensus.io/trace"
+	"go.opentelemetry.io/otel/api/trace"
+	"go.opentelemetry.io/otel/label"
+	export "go.opentelemetry.io/otel/sdk/export/trace"
+	"google.golang.org/grpc/codes"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext"
 )
 
 // statusCodes maps (*trace.SpanData).Status.Code to their message and http status code. See:
 // https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto.
-var statusCodes = map[int32]codeDetails{
-	trace.StatusCodeOK:                 {message: "OK", status: http.StatusOK},
-	trace.StatusCodeCancelled:          {message: "CANCELLED", status: 499},
-	trace.StatusCodeUnknown:            {message: "UNKNOWN", status: http.StatusInternalServerError},
-	trace.StatusCodeInvalidArgument:    {message: "INVALID_ARGUMENT", status: http.StatusBadRequest},
-	trace.StatusCodeDeadlineExceeded:   {message: "DEADLINE_EXCEEDED", status: http.StatusGatewayTimeout},
-	trace.StatusCodeNotFound:           {message: "NOT_FOUND", status: http.StatusNotFound},
-	trace.StatusCodeAlreadyExists:      {message: "ALREADY_EXISTS", status: http.StatusConflict},
-	trace.StatusCodePermissionDenied:   {message: "PERMISSION_DENIED", status: http.StatusForbidden},
-	trace.StatusCodeResourceExhausted:  {message: "RESOURCE_EXHAUSTED", status: http.StatusTooManyRequests},
-	trace.StatusCodeFailedPrecondition: {message: "FAILED_PRECONDITION", status: http.StatusBadRequest},
-	trace.StatusCodeAborted:            {message: "ABORTED", status: http.StatusConflict},
-	trace.StatusCodeOutOfRange:         {message: "OUT_OF_RANGE", status: http.StatusBadRequest},
-	trace.StatusCodeUnimplemented:      {message: "UNIMPLEMENTED", status: http.StatusNotImplemented},
-	trace.StatusCodeInternal:           {message: "INTERNAL", status: http.StatusInternalServerError},
-	trace.StatusCodeUnavailable:        {message: "UNAVAILABLE", status: http.StatusServiceUnavailable},
-	trace.StatusCodeDataLoss:           {message: "DATA_LOSS", status: http.StatusNotImplemented},
-	trace.StatusCodeUnauthenticated:    {message: "UNAUTHENTICATED", status: http.StatusUnauthorized},
+var statusCodes = map[codes.Code]codeDetails{
+	codes.OK:                 {message: "OK", status: http.StatusOK},
+	codes.Canceled:           {message: "CANCELLED", status: 499},
+	codes.Unknown:            {message: "UNKNOWN", status: http.StatusInternalServerError},
+	codes.InvalidArgument:    {message: "INVALID_ARGUMENT", status: http.StatusBadRequest},
+	codes.DeadlineExceeded:   {message: "DEADLINE_EXCEEDED", status: http.StatusGatewayTimeout},
+	codes.NotFound:           {message: "NOT_FOUND", status: http.StatusNotFound},
+	codes.AlreadyExists:      {message: "ALREADY_EXISTS", status: http.StatusConflict},
+	codes.PermissionDenied:   {message: "PERMISSION_DENIED", status: http.StatusForbidden},
+	codes.ResourceExhausted:  {message: "RESOURCE_EXHAUSTED", status: http.StatusTooManyRequests},
+	codes.FailedPrecondition: {message: "FAILED_PRECONDITION", status: http.StatusBadRequest},
+	codes.Aborted:            {message: "ABORTED", status: http.StatusConflict},
+	codes.OutOfRange:         {message: "OUT_OF_RANGE", status: http.StatusBadRequest},
+	codes.Unimplemented:      {message: "UNIMPLEMENTED", status: http.StatusNotImplemented},
+	codes.Internal:           {message: "INTERNAL", status: http.StatusInternalServerError},
+	codes.Unavailable:        {message: "UNAVAILABLE", status: http.StatusServiceUnavailable},
+	codes.DataLoss:           {message: "DATA_LOSS", status: http.StatusNotImplemented},
+	codes.Unauthenticated:    {message: "UNAUTHENTICATED", status: http.StatusUnauthorized},
 }
 
 // codeDetails specifies information about a trace status code.
@@ -43,13 +46,13 @@ type codeDetails struct {
 	status  int    // corresponding HTTP status code
 }
 
-// convertSpan takes an OpenCensus span and returns a Datadog span.
-func (e *traceExporter) convertSpan(s *trace.SpanData) *ddSpan {
+// convertSpan takes an OpenTelemetry span and returns a Datadog span.
+func (e *traceExporter) convertSpan(s *export.SpanData) *ddSpan {
 	startNano := s.StartTime.UnixNano()
 	span := &ddSpan{
 		TraceID:  binary.BigEndian.Uint64(s.SpanContext.TraceID[8:]),
 		SpanID:   binary.BigEndian.Uint64(s.SpanContext.SpanID[:]),
-		Name:     "opencensus",
+		Name:     "opentelemetry",
 		Resource: s.Name,
 		Service:  e.opts.Service,
 		Start:    startNano,
@@ -57,14 +60,14 @@ func (e *traceExporter) convertSpan(s *trace.SpanData) *ddSpan {
 		Metrics:  map[string]float64{},
 		Meta:     map[string]string{},
 	}
-	if s.ParentSpanID != (trace.SpanID{}) {
+	if s.ParentSpanID.IsValid() {
 		span.ParentID = binary.BigEndian.Uint64(s.ParentSpanID[:])
 	}
 
-	code, ok := statusCodes[s.Status.Code]
+	code, ok := statusCodes[s.StatusCode]
 	if !ok {
 		code = codeDetails{
-			message: "ERR_CODE_" + strconv.FormatInt(int64(s.Status.Code), 10),
+			message: "ERR_CODE_" + strconv.FormatInt(int64(s.StatusCode), 10),
 			status:  http.StatusInternalServerError,
 		}
 	}
@@ -86,57 +89,65 @@ func (e *traceExporter) convertSpan(s *trace.SpanData) *ddSpan {
 
 	if span.Error == 1 {
 		span.Meta[ext.ErrorType] = code.message
-		if msg := s.Status.Message; msg != "" {
+		if msg := s.StatusMessage; msg != "" {
 			span.Meta[ext.ErrorMsg] = msg
 		}
 	}
 
-	span.Meta[keyStatusCode] = strconv.Itoa(int(s.Status.Code))
+	span.Meta[keyStatusCode] = strconv.Itoa(int(s.StatusCode))
 	span.Meta[keyStatus] = code.message
-	if msg := s.Status.Message; msg != "" {
+	if msg := s.StatusMessage; msg != "" {
 		span.Meta[keyStatusDescription] = msg
 	}
 
-	for key, val := range e.opts.GlobalTags {
-		setTag(span, key, val)
+	for _, attr := range e.opts.GlobalTags {
+		setTag(span, string(attr.Key), attr.Value)
 	}
-	for key, val := range s.Attributes {
-		setTag(span, key, val)
+	for _, attr := range s.Attributes {
+		setTag(span, string(attr.Key), attr.Value)
 	}
 	return span
 }
 
 const (
 	keySamplingPriority     = "_sampling_priority_v1"
-	keyStatusDescription    = "opencensus.status_description"
-	keyStatusCode           = "opencensus.status_code"
-	keyStatus               = "opencensus.status"
+	keyStatusDescription    = "opentelemetry.status_description"
+	keyStatusCode           = "opentelemetry.status_code"
+	keyStatus               = "opentelemetry.status"
 	keySpanName             = "span.name"
 	keySamplingPriorityRate = "_sampling_priority_rate_v1"
 )
 
-func setTag(s *ddSpan, key string, val interface{}) {
+func setTag(s *ddSpan, key string, val label.Value) {
 	if key == ext.Error {
 		setError(s, val)
 		return
 	}
-	switch v := val.(type) {
-	case string:
-		setStringTag(s, key, v)
-	case bool:
-		if v {
+	switch val.Type() {
+	case label.STRING:
+		setStringTag(s, key, val.AsString())
+	case label.BOOL:
+		if val.AsBool() {
 			setStringTag(s, key, "true")
 		} else {
 			setStringTag(s, key, "false")
 		}
-	case float64:
-		setMetric(s, key, v)
-	case int64:
-		setMetric(s, key, float64(v))
-	default:
+	case label.FLOAT32:
+		setMetric(s, key, float64(val.AsFloat32()))
+	case label.FLOAT64:
+		setMetric(s, key, val.AsFloat64())
+	case label.INT32:
+		setMetric(s, key, float64(val.AsInt32()))
+	case label.INT64:
+		setMetric(s, key, float64(val.AsInt64()))
+	case label.UINT32:
+		setMetric(s, key, float64(val.AsUint32()))
+	case label.UINT64:
+		setMetric(s, key, float64(val.AsUint64()))
+	case label.ARRAY:
 		// should never happen according to docs, nevertheless
 		// we should account for this to avoid exceptions
-		setStringTag(s, key, fmt.Sprintf("%v", v))
+		setStringTag(s, key, fmt.Sprintf("%v", val.AsArray()))
 	}
 }
 
@@ -170,24 +181,42 @@ func setStringTag(s *ddSpan, key, v string) {
 	}
 }
 
-func setError(s *ddSpan, val interface{}) {
-	switch v := val.(type) {
-	case string:
+func setError(s *ddSpan, val label.Value) {
+	switch val.Type() {
+	case label.STRING:
 		s.Error = 1
-		s.Meta[ext.ErrorMsg] = v
-	case bool:
-		if v {
+		s.Meta[ext.ErrorMsg] = val.AsString()
+	case label.BOOL:
+		if val.AsBool() {
 			s.Error = 1
 		} else {
 			s.Error = 0
 		}
-	case int64:
-		if v > 0 {
+	case label.INT32:
+		if val.AsInt32() > 0 {
 			s.Error = 1
 		} else {
 			s.Error = 0
 		}
-	case nil:
+	case label.INT64:
+		if val.AsInt64() > 0 {
+			s.Error = 1
+		} else {
+			s.Error = 0
+		}
+	case label.UINT32:
+		if val.AsUint32() > 0 {
+			s.Error = 1
+		} else {
+			s.Error = 0
+		}
+	case label.UINT64:
+		if val.AsUint64() > 0 {
+			s.Error = 1
+		} else {
+			s.Error = 0
+		}
+	case label.INVALID:
 		s.Error = 0
 	default:
 		s.Error = 1

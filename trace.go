@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"go.opencensus.io/trace"
+	"go.opentelemetry.io/otel/sdk/export/trace"
 )
 
 const (
@@ -22,7 +22,7 @@ const (
 	// defaultService specifies the default service name that will be used
 	// with the registered traces. Users should normally specify a different
 	// service name.
-	defaultService = "opencensus-app"
+	defaultService = "opentelemetry-app"
 )
 
 // allows tests to override
